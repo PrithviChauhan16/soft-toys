@@ -1,338 +1,738 @@
-/* PEPE KUN - main shop logic
-   Visual/layout source is kept separate. This file only handles functionality. */
+/* PEPE KUN - functionality only. UI/design/photos unchanged */
 
-const SUPABASE_URL = 'https://cmxhngjykgoqblobyefh.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjbXhobmdqa2dvcWJsb2J5ZWZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkyNDAwNTMsImV4cCI6MjEwNDgxNjA1M30.puMa5Ty4NTWxzTM9gnSHzqAVMzgMhgAfTPu-8sIVgPM';
+(function () {
+  'use strict';
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const SUPABASE_URL =
+    'https://cmxhngjykgoqblobyefh.supabase.co';
 
-let products = [];
-let cart = [];
-let currentUser = null;
+  const SUPABASE_ANON_KEY =
+    'sb_publishable_05GBhGfDMBLN009-tv5soQ_XKQ_7jPc';
 
-function escapeHtml(value = '') {
-  return String(value).replace(/[&<>'"]/g, ch => ({
-    '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;'
-  }[ch]));
-}
-
-function getLocalCart() {
-  try {
-    const value = JSON.parse(localStorage.getItem('pepekun_cart') || '[]');
-    return Array.isArray(value) ? value : [];
-  } catch (_) {
-    return [];
-  }
-}
-
-function saveLocalCart() {
-  localStorage.setItem('pepekun_cart', JSON.stringify(cart));
-}
-
-function cartQuantity(items) {
-  return items.reduce((total, item) => total + (Number(item.quantity) || 1), 0);
-}
-
-function mergeCarts(first, second) {
-  const merged = first.map(item => ({...item, quantity: Number(item.quantity) || 1}));
-  for (const item of second) {
-    const existing = merged.find(x => String(x.id) === String(item.id));
-    if (existing) existing.quantity += Number(item.quantity) || 1;
-    else merged.push({...item, quantity: Number(item.quantity) || 1});
-  }
-  return merged;
-}
-
-function toggleMobileMenu() {
-  const menu = document.getElementById('mobile-menu');
-  if (!menu) return;
-  menu.classList.toggle('hidden');
-  menu.classList.toggle('flex');
-}
-
-function updateCartUI() {
-  const count = cartQuantity(cart);
-  ['cart-count', 'cart-count-mobile'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = count;
-  });
-}
-
-async function loadProducts() {
-  const { data, error } = await supabase
-    .from('products')
-    .select('*')
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('Products load error:', error);
-    products = [];
-    const grid = document.getElementById('product-grid');
-    if (grid) grid.innerHTML = '<div class="col-span-full text-center bg-white/80 rounded-3xl p-12">Products could not be loaded. Please check the Supabase products table and RLS settings.</div>';
-    return false;
+  if (
+    !window.supabase ||
+    typeof window.supabase.createClient !== 'function'
+  ) {
+    console.error('Supabase library did not load.');
+    return;
   }
 
-  products = data || [];
-  return true;
-}
+  const supabaseClient =
+    window.supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY
+    );
 
-async function loadUserAndCart() {
-  cart = getLocalCart();
+  let products = [];
 
-  const { data, error } = await supabase.auth.getUser();
-  currentUser = data?.user || null;
+  let cart = JSON.parse(
+    localStorage.getItem('pepekun_cart') || '[]'
+  );
 
-  if (currentUser) {
-    const result = await supabase
-      .from('carts')
-      .select('items')
-      .eq('user_id', currentUser.id)
-      .maybeSingle();
+  let currentUser = null;
 
-    if (!result.error && Array.isArray(result.data?.items)) {
-      // Keep guest-cart items and merge them with the saved account cart.
-      cart = mergeCarts(result.data.items, cart);
-      await saveCartToSupabase();
-    } else if (result.error) {
-      console.warn('Could not load saved cart:', result.error.message);
+  function toggleMobileMenu() {
+    const menu =
+      document.getElementById('mobile-menu');
+
+    if (!menu) return;
+
+    menu.classList.toggle('hidden');
+    menu.classList.toggle('flex');
+  }
+
+  function escapeHtml(value = '') {
+    return String(value).replace(
+      /[&<>'"]/g,
+      char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;'
+      }[char])
+    );
+  }
+
+  async function loadProducts() {
+    const { data, error } =
+      await supabaseClient
+        .from('products')
+        .select('*');
+
+    if (error) {
+      console.error(
+        'PRODUCTS LOAD ERROR:',
+        error
+      );
+
+      alert(
+        'Products error: ' +
+        error.message
+      );
+
+      return;
+    }
+
+    products = data || [];
+
+    console.log(
+      'Products loaded:',
+      products.length
+    );
+  }
+
+  async function loadUserAndCart() {
+    const {
+      data: { user }
+    } = await supabaseClient.auth.getUser();
+
+    currentUser = user || null;
+
+    if (currentUser) {
+      const { data, error } =
+        await supabaseClient
+          .from('carts')
+          .select('items')
+          .eq(
+            'user_id',
+            currentUser.id
+          )
+          .maybeSingle();
+
+      if (!error && data?.items) {
+        cart = data.items;
+
+        localStorage.setItem(
+          'pepekun_cart',
+          JSON.stringify(cart)
+        );
+      }
+    }
+
+    updateCartUI();
+  }
+
+  async function syncCart() {
+    localStorage.setItem(
+      'pepekun_cart',
+      JSON.stringify(cart)
+    );
+
+    if (currentUser) {
+      const { error } =
+        await supabaseClient
+          .from('carts')
+          .upsert(
+            {
+              user_id: currentUser.id,
+              items: cart
+            },
+            {
+              onConflict: 'user_id'
+            }
+          );
+
+      if (error) {
+        console.error(
+          'Cart save error:',
+          error
+        );
+      }
+    }
+
+    updateCartUI();
+  }
+
+  function updateCartUI() {
+    const count =
+      cart.reduce(
+        (total, item) =>
+          total +
+          (Number(item.quantity) || 1),
+        0
+      );
+
+    [
+      'cart-count',
+      'cart-count-mobile'
+    ].forEach(id => {
+      const element =
+        document.getElementById(id);
+
+      if (element) {
+        element.textContent = count;
+      }
+    });
+  }
+
+  async function addToCart(productId) {
+    const product =
+      products.find(
+        item =>
+          String(item.id) ===
+          String(productId)
+      );
+
+    if (!product) {
+      alert(
+        'This product is not available right now.'
+      );
+      return;
+    }
+
+    const existing =
+      cart.find(
+        item =>
+          String(
+            item.product_id || item.id
+          ) ===
+          String(productId)
+      );
+
+    if (existing) {
+      existing.quantity =
+        (Number(existing.quantity) || 1) + 1;
+    } else {
+      cart.push({
+        ...product,
+        product_id: product.id,
+        quantity: 1
+      });
+    }
+
+    await syncCart();
+
+    const button =
+      document.getElementById(
+        `btn-${productId}`
+      );
+
+    if (button) {
+      const oldText =
+        button.textContent;
+
+      button.textContent =
+        'Added ✓';
+
+      setTimeout(() => {
+        button.textContent = oldText;
+      }, 1200);
     }
   }
 
-  saveLocalCart();
-  updateCartUI();
-}
+  function showCategory(categoryName) {
+    const section =
+      document.getElementById(
+        'product-display'
+      );
 
-async function saveCartToSupabase() {
-  saveLocalCart();
-  if (!currentUser) {
-    updateCartUI();
-    return true;
-  }
+    const grid =
+      document.getElementById(
+        'product-grid'
+      );
 
-  const { error } = await supabase
-    .from('carts')
-    .upsert(
-      { user_id: currentUser.id, items: cart, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id' }
+    const title =
+      document.getElementById(
+        'active-category-title'
+      );
+
+    if (!section || !grid) {
+      console.error(
+        'Product display elements not found.'
+      );
+      return;
+    }
+
+    const list =
+      products.filter(
+        product =>
+          String(
+            product.category || ''
+          ).toLowerCase() ===
+          String(
+            categoryName || ''
+          ).toLowerCase()
+      );
+
+    if (title) {
+      title.textContent =
+        categoryName;
+    }
+
+    grid.innerHTML =
+      list.length
+        ? list
+            .map(
+              product => `
+        <div class="masonry-item bg-white/90 backdrop-blur-md rounded-3xl overflow-hidden shadow-sm border border-gray-100 relative group">
+
+          <div class="cloud-tag">
+            ${escapeHtml(
+              product.tag || 'PEPE KUN'
+            )}
+          </div>
+
+          <div class="w-full ${escapeHtml(
+            product.heightClass ||
+            'h-[300px]'
+          )} overflow-hidden">
+
+            <img
+              src="${escapeHtml(
+                product.image_url ||
+                product.image ||
+                ''
+              )}"
+              onclick="openProductModal('${escapeHtml(
+                product.id
+              )}')"
+              class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 cursor-pointer"
+              alt="${escapeHtml(
+                product.name || ''
+              )}"
+            >
+
+          </div>
+
+          <div class="p-4 md:p-5">
+
+            <div class="flex justify-between gap-3">
+
+              <h3
+                onclick="openProductModal('${escapeHtml(
+                  product.id
+                )}')"
+                class="font-medium text-lg cursor-pointer hover:text-pink-500"
+              >
+                ${escapeHtml(
+                  product.name || ''
+                )}
+              </h3>
+
+              <span class="font-semibold">
+                ₹${Number(
+                  product.price || 0
+                ).toLocaleString('en-IN')}
+              </span>
+
+            </div>
+
+            <button
+              id="btn-${escapeHtml(
+                product.id
+              )}"
+              onclick="addToCart('${escapeHtml(
+                product.id
+              )}')"
+              class="mt-4 w-full bg-brand-900 text-white rounded-full py-2.5"
+            >
+              Add to Cart
+            </button>
+
+          </div>
+        </div>
+      `
+            )
+            .join('')
+        : `
+        <div class="col-span-full text-center bg-white/80 rounded-3xl p-12">
+          No products in this collection yet.
+        </div>
+      `;
+
+    section.classList.remove(
+      'hidden'
     );
 
-  if (error) {
-    console.error('Cart save error:', error);
-    return false;
+    setTimeout(() => {
+      section.classList.remove(
+        'opacity-0'
+      );
+
+      section.scrollIntoView({
+        behavior: 'smooth'
+      });
+    }, 20);
   }
 
-  updateCartUI();
-  return true;
-}
+  function hideProducts() {
+    const section =
+      document.getElementById(
+        'product-display'
+      );
 
-async function addToCart(productId) {
-  const product = products.find(item => String(item.id) === String(productId));
-  if (!product) {
-    alert('This product is not available right now.');
-    return;
+    if (!section) return;
+
+    section.classList.add(
+      'opacity-0'
+    );
+
+    setTimeout(() => {
+      section.classList.add(
+        'hidden'
+      );
+    }, 300);
   }
 
-  const existing = cart.find(item => String(item.id) === String(productId));
-  if (existing) existing.quantity = (Number(existing.quantity) || 1) + 1;
-  else cart.push({...product, quantity: 1});
+  function updateCenterMedia(
+    type,
+    url
+  ) {
+    const image =
+      document.getElementById(
+        'center-img'
+      );
 
-  await saveCartToSupabase();
+    const videoContainer =
+      document.getElementById(
+        'center-video-container'
+      );
 
-  const button = document.getElementById(`btn-${productId}`);
-  if (button) {
-    const oldText = button.textContent;
-    button.textContent = 'Added ✓';
-    setTimeout(() => { button.textContent = oldText; }, 1200);
-  }
-}
+    const video =
+      document.getElementById(
+        'center-video'
+      );
 
-function showCategory(categoryName) {
-  const section = document.getElementById('product-display');
-  const grid = document.getElementById('product-grid');
-  const title = document.getElementById('active-category-title');
-  if (!section || !grid || !title) return;
+    const source =
+      document.getElementById(
+        'center-video-src'
+      );
 
-  const list = products.filter(p => p.category === categoryName);
-  title.textContent = categoryName;
+    if (
+      !image ||
+      !videoContainer ||
+      !video ||
+      !source
+    ) {
+      return;
+    }
 
-  grid.innerHTML = list.length
-    ? list.map(p => `
-      <div class="masonry-item bg-white/90 backdrop-blur-md rounded-3xl overflow-hidden shadow-sm border border-gray-100 relative group">
-        <div class="cloud-tag">${escapeHtml(p.tag || 'PEPE KUN')}</div>
-        <div class="w-full ${escapeHtml(p.heightClass || 'h-[300px]')} overflow-hidden">
-          <img src="${escapeHtml(p.image || '')}" onclick="openProductModal('${escapeHtml(p.id)}')"
-               class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 cursor-pointer"
-               alt="${escapeHtml(p.name || 'PEPE KUN plushie')}">
-        </div>
-        <div class="p-4 md:p-5">
-          <div class="flex justify-between gap-3">
-            <h3 onclick="openProductModal('${escapeHtml(p.id)}')" class="font-medium text-lg cursor-pointer hover:text-pink-500">
-              ${escapeHtml(p.name || 'PEPE KUN Plushie')}
-            </h3>
-            <span class="font-semibold whitespace-nowrap">₹${Number(p.price || 0)}</span>
-          </div>
-          <button id="btn-${escapeHtml(p.id)}" onclick="addToCart('${escapeHtml(p.id)}')"
-                  class="mt-4 w-full bg-brand-900 text-white rounded-full py-2.5">
-            Add to Cart
-          </button>
-        </div>
-      </div>
-    `).join('')
-    : '<div class="col-span-full text-center bg-white/80 rounded-3xl p-12">No products in this collection yet.</div>';
-
-  section.classList.remove('hidden');
-  setTimeout(() => {
-    section.classList.remove('opacity-0');
-    section.scrollIntoView({behavior: 'smooth', block: 'start'});
-  }, 20);
-}
-
-function hideProducts() {
-  const section = document.getElementById('product-display');
-  if (!section) return;
-  section.classList.add('opacity-0');
-  setTimeout(() => section.classList.add('hidden'), 300);
-}
-
-function updateCenterMedia(type, url) {
-  const image = document.getElementById('center-img');
-  const videoContainer = document.getElementById('center-video-container');
-  const video = document.getElementById('center-video');
-  const source = document.getElementById('center-video-src');
-  if (!image || !videoContainer || !video || !source) return;
-
-  if (type === 'image') {
-    video.pause();
-    videoContainer.classList.add('hidden');
-    image.src = url;
-    image.classList.remove('hidden');
-  } else {
-    image.classList.add('hidden');
-    source.src = url;
-    videoContainer.classList.remove('hidden');
-    video.load();
-    video.play().catch(() => {});
-    video.onerror = () => {
-      // The original project references an optional local video file.
-      // If it is not included, show an existing PEPE KUN image instead of a broken player.
+    if (type === 'image') {
       video.pause();
-      videoContainer.classList.add('hidden');
-      image.src = 'https://images.unsplash.com/photo-1558285549-2a05f32b1ba6?q=80&w=800';
-      image.classList.remove('hidden');
-    };
-  }
-}
 
-function openProductModal(productId) {
-  const product = products.find(item => String(item.id) === String(productId));
-  if (!product) return;
+      videoContainer.classList.add(
+        'hidden'
+      );
 
-  const setText = (id, value) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = value;
-  };
+      image.src = url;
 
-  setText('modal-title', product.name || 'PEPE KUN Plushie');
-  setText('modal-price', `₹${Number(product.price || 0)}`);
-  setText('modal-category', product.category || '');
-  setText('modal-desc', product.description || 'A beautifully crafted companion from Pepe Kun.');
+      image.classList.remove(
+        'hidden'
+      );
+    } else {
+      image.classList.add(
+        'hidden'
+      );
 
-  const mainImage = document.getElementById('modal-main-img');
-  if (mainImage) {
-    mainImage.src = product.image || '';
-    mainImage.alt = product.name || 'PEPE KUN Plushie';
-  }
+      source.src = url;
 
-  const specs = Array.isArray(product.specs) ? product.specs : [];
-  const specsEl = document.getElementById('modal-specs');
-  if (specsEl) {
-    specsEl.innerHTML = specs.length
-      ? specs.map(item => `<li>• ${escapeHtml(item)}</li>`).join('')
-      : '<li>• Premium plush material</li>';
+      video.load();
+
+      video.play().catch(() => {});
+
+      videoContainer.classList.remove(
+        'hidden'
+      );
+    }
   }
 
-  const gallery = document.getElementById('modal-gallery');
-  if (gallery) {
-    const galleryItems = Array.isArray(product.gallery) && product.gallery.length
-      ? product.gallery
-      : [product.image].filter(Boolean);
+  function openProductModal(id) {
+    const product =
+      products.find(
+        item =>
+          String(item.id) ===
+          String(id)
+      );
 
-    gallery.innerHTML = galleryItems.map((url, index) => `
-      <img src="${escapeHtml(url)}"
-           onclick="document.getElementById('modal-main-img').src='${escapeHtml(url)}'"
-           class="w-20 h-20 object-cover rounded-xl border-2 ${index === 0 ? 'border-pink-500' : 'border-transparent'} hover:border-pink-500 cursor-pointer"
-           alt="Product photo ${index + 1}">
-    `).join('');
+    if (!product) return;
+
+    const modalTitle =
+      document.getElementById(
+        'modal-title'
+      );
+
+    const modalPrice =
+      document.getElementById(
+        'modal-price'
+      );
+
+    const modalCategory =
+      document.getElementById(
+        'modal-category'
+      );
+
+    const modalDesc =
+      document.getElementById(
+        'modal-desc'
+      );
+
+    const modalMainImg =
+      document.getElementById(
+        'modal-main-img'
+      );
+
+    const modalSpecs =
+      document.getElementById(
+        'modal-specs'
+      );
+
+    const modalGallery =
+      document.getElementById(
+        'modal-gallery'
+      );
+
+    const modalAddBtn =
+      document.getElementById(
+        'modal-add-btn'
+      );
+
+    const modalBuyBtn =
+      document.getElementById(
+        'modal-buy-btn'
+      );
+
+    if (modalTitle) {
+      modalTitle.textContent =
+        product.name || '';
+    }
+
+    if (modalPrice) {
+      modalPrice.textContent =
+        `₹${Number(
+          product.price || 0
+        ).toLocaleString('en-IN')}`;
+    }
+
+    if (modalCategory) {
+      modalCategory.textContent =
+        product.category || '';
+    }
+
+    if (modalDesc) {
+      modalDesc.textContent =
+        product.description ||
+        'A beautifully crafted companion from Pepe Kun.';
+    }
+
+    if (modalMainImg) {
+      modalMainImg.src =
+        product.image_url ||
+        product.image ||
+        '';
+    }
+
+    const specs =
+      Array.isArray(product.specs)
+        ? product.specs
+        : [];
+
+    if (modalSpecs) {
+      modalSpecs.innerHTML =
+        specs.length
+          ? specs
+              .map(
+                item =>
+                  `<li>• ${escapeHtml(
+                    item
+                  )}</li>`
+              )
+              .join('')
+          : '<li>• Premium plush material</li>';
+    }
+
+    const gallery =
+      Array.isArray(
+        product.gallery
+      ) &&
+      product.gallery.length
+        ? product.gallery
+        : [
+            product.image_url ||
+            product.image
+          ];
+
+    if (modalGallery) {
+      modalGallery.innerHTML =
+        gallery
+          .filter(Boolean)
+          .map(
+            image => `
+            <img
+              src="${escapeHtml(
+                image
+              )}"
+              onclick="document.getElementById('modal-main-img').src='${escapeHtml(
+                image
+              )}'"
+              class="w-20 h-20 object-cover rounded-xl border-2 border-transparent hover:border-pink-500 cursor-pointer"
+              alt=""
+            >
+          `
+          )
+          .join('');
+    }
+
+    if (modalAddBtn) {
+      modalAddBtn.onclick = () =>
+        addToCart(product.id);
+    }
+
+    if (modalBuyBtn) {
+      modalBuyBtn.onclick =
+        async () => {
+          await addToCart(
+            product.id
+          );
+
+          location.href =
+            'cart.html';
+        };
+    }
+
+    const modal =
+      document.getElementById(
+        'product-modal'
+      );
+
+    if (modal) {
+      modal.classList.remove(
+        'hidden'
+      );
+
+      modal.classList.add(
+        'flex'
+      );
+
+      document.body.style.overflow =
+        'hidden';
+    }
   }
 
-  const addButton = document.getElementById('modal-add-btn');
-  const buyButton = document.getElementById('modal-buy-btn');
-  if (addButton) addButton.onclick = () => addToCart(product.id);
-  if (buyButton) buyButton.onclick = async () => {
-    await addToCart(product.id);
-    window.location.href = 'cart.html';
-  };
+  function closeModal() {
+    const modal =
+      document.getElementById(
+        'product-modal'
+      );
 
-  const modal = document.getElementById('product-modal');
-  if (modal) {
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
-    requestAnimationFrame(() => modal.classList.remove('opacity-0'));
-    document.body.style.overflow = 'hidden';
-  }
-}
+    if (!modal) return;
 
-function closeModal() {
-  const modal = document.getElementById('product-modal');
-  if (!modal) return;
-  modal.classList.add('opacity-0');
-  setTimeout(() => {
-    modal.classList.add('hidden');
-    modal.classList.remove('flex');
-  }, 300);
-  document.body.style.overflow = '';
-}
+    modal.classList.add(
+      'hidden'
+    );
 
-async function submitEnquiry(event) {
-  event.preventDefault();
+    modal.classList.remove(
+      'flex'
+    );
 
-  const form = event.target;
-  const name = form.querySelector('[name="name"]')?.value.trim();
-  const email = form.querySelector('[name="email"]')?.value.trim();
-  const message = form.querySelector('[name="message"]')?.value.trim();
-
-  if (!name || !email || !message) {
-    alert('Please fill in all fields.');
-    return;
+    document.body.style.overflow =
+      'auto';
   }
 
-  const button = form.querySelector('button[type="submit"]');
-  if (button) {
-    button.disabled = true;
-    button.textContent = 'Sending...';
+  async function submitEnquiry(
+    event
+  ) {
+    event.preventDefault();
+
+    const form =
+      event.target;
+
+    const name =
+      form
+        .querySelector(
+          '[name=name]'
+        )
+        ?.value.trim() || '';
+
+    const email =
+      form
+        .querySelector(
+          '[name=email]'
+        )
+        ?.value.trim() || '';
+
+    const message =
+      form
+        .querySelector(
+          '[name=message]'
+        )
+        ?.value.trim() || '';
+
+    const { error } =
+      await supabaseClient
+        .from('enquiries')
+        .insert([
+          {
+            name,
+            email,
+            message
+          }
+        ]);
+
+    if (error) {
+      console.error(
+        'Enquiry error:',
+        error
+      );
+
+      alert(
+        'Could not send message: ' +
+        error.message
+      );
+
+      return;
+    }
+
+    form.reset();
+
+    alert(
+      'Message sent successfully!'
+    );
   }
 
-  const { error } = await supabase.from('enquiries').insert([{name, email, message}]);
+  /*
+    Make functions available to
+    onclick="..." handlers in index.html.
+  */
 
-  if (button) {
-    button.disabled = false;
-    button.textContent = 'Send Message';
-  }
+  window.toggleMobileMenu =
+    toggleMobileMenu;
 
-  if (error) {
-    console.error('Enquiry error:', error);
-    alert('Could not send message: ' + error.message);
-    return;
-  }
+  window.showCategory =
+    showCategory;
 
-  form.reset();
-  alert('Message sent successfully!');
-}
+  window.hideProducts =
+    hideProducts;
 
-document.addEventListener('DOMContentLoaded', async () => {
-  await loadProducts();
-  await loadUserAndCart();
+  window.updateCenterMedia =
+    updateCenterMedia;
 
-  const contactForm = document.getElementById('contact-form');
-  if (contactForm) contactForm.addEventListener('submit', submitEnquiry);
-});
+  window.openProductModal =
+    openProductModal;
+
+  window.closeModal =
+    closeModal;
+
+  window.addToCart =
+    addToCart;
+
+  document.addEventListener(
+    'DOMContentLoaded',
+    async () => {
+      await loadProducts();
+      await loadUserAndCart();
+
+      const form =
+        document.getElementById(
+          'contact-form'
+        );
+
+      if (form) {
+        form.addEventListener(
+          'submit',
+          submitEnquiry
+        );
+      }
+    }
+  );
+})();
